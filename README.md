@@ -110,9 +110,9 @@ Then open [http://localhost:3000](http://localhost:3000).
 
 | Project | Description |
 |---|---|
-| [suzune_check](https://github.com/youruser/suzune_check) | Security audit tool with Ansible for Debian/Ubuntu |
-| [fern_ops](https://github.com/youruser/fern_ops) | IaC stack with supervision |
-| [ishtar_sound](https://github.com/youruser/ishtar_sound) | Just a public blindtest webapp |
+| [suzune_check](https://github.com/Giremuu/suzune_check) | Security audit tool with Ansible for Debian/Ubuntu |
+| [fern_ops](https://github.com/Giremuu/fern_ops) | IaC stack with supervision |
+| [ishtar_sound](https://github.com/Giremuu/ishtar_sound) | Just a public blindtest webapp |
 
 ---
 

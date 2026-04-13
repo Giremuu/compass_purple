@@ -1,7 +1,7 @@
-import re
 import subprocess
 from pathlib import Path
 
+import paramiko
 import yaml
 
 from engine.base import RedModule
@@ -37,11 +37,6 @@ def list_techniques(platform: str = "linux") -> list[dict]:
     techniques = []
     for tactic, tactic_techniques in index.items():
         for technique_id, technique_data in tactic_techniques.items():
-            ext_refs = technique_data.get("technique", {}).get("external_references", [])
-            name = next(
-                (r.get("external_id") for r in ext_refs if r.get("source_name") == "mitre-attack"),
-                technique_id,
-            )
             techniques.append({
                 "id": technique_id,
                 "name": technique_data.get("technique", {}).get("name", ""),
@@ -56,8 +51,56 @@ def get_technique(technique_id: str) -> dict | None:
     yaml_path = ATOMICS_PATH / technique_id / f"{technique_id}.yaml"
     if not yaml_path.exists():
         return None
-    data = _load_yaml(yaml_path)
-    return data
+    return _load_yaml(yaml_path)
+
+
+def _run_local(command: str, executor_name: str) -> dict:
+    """Execute a command on the local machine."""
+    shell_map = {
+        "sh": ["sh", "-c"],
+        "bash": ["bash", "-c"],
+        "command_prompt": ["sh", "-c"],
+        "powershell": ["sh", "-c"],
+    }
+    shell = shell_map.get(executor_name, ["sh", "-c"])
+    try:
+        result = subprocess.run(shell + [command], capture_output=True, text=True, timeout=30)
+        return {
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "returncode": result.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"error": "Command timed out (30s)"}
+
+
+def _run_ssh(command: str, target: dict) -> dict:
+    """Execute a command on a remote target via SSH."""
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        connect_kwargs = {
+            "hostname": target["host"],
+            "port": target.get("port", 22),
+            "username": target["username"],
+            "timeout": 30,
+        }
+        if target.get("ssh_key_path"):
+            connect_kwargs["key_filename"] = target["ssh_key_path"]
+        elif target.get("password"):
+            connect_kwargs["password"] = target["password"]
+
+        client.connect(**connect_kwargs)
+        _, stdout, stderr = client.exec_command(command, timeout=30)
+        return {
+            "stdout": stdout.read().decode(),
+            "stderr": stderr.read().decode(),
+            "returncode": stdout.channel.recv_exit_status(),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        client.close()
 
 
 class AtomicRedTeamModule(RedModule):
@@ -69,10 +112,11 @@ class AtomicRedTeamModule(RedModule):
         """
         params:
           - action: "list" | "get" | "execute"
-          - platform: "linux" | "windows" | "macos"  (for list)
-          - technique_id: e.g. "T1003"               (for get / execute)
-          - test_index: int (0-based)                 (for execute)
-          - input_args: dict of overrides             (for execute, optional)
+          - platform: "linux" | "windows" | "macos"    (for list)
+          - technique_id: e.g. "T1057"                 (for get / execute)
+          - test_index: int (0-based)                   (for execute)
+          - input_args: dict of overrides               (for execute, optional)
+          - target: {host, port, username, password, ssh_key_path}  (optional — local if absent)
         """
         action = params.get("action", "list")
 
@@ -98,6 +142,7 @@ class AtomicRedTeamModule(RedModule):
         technique_id = params.get("technique_id")
         test_index = params.get("test_index", 0)
         input_overrides = params.get("input_args", {})
+        target = params.get("target")  # None = execute locally
 
         if not technique_id:
             return {"status": "error", "message": "technique_id is required"}
@@ -118,40 +163,25 @@ class AtomicRedTeamModule(RedModule):
         if not command:
             return {"status": "error", "message": "No command defined for this test"}
 
-        # Merge default input args with user overrides
         input_arguments = test.get("input_arguments", {})
         for key, value in input_overrides.items():
             if key in input_arguments:
                 input_arguments[key]["default"] = value
-
         command = _resolve_input_args(command, input_arguments)
 
-        # Map executor name to shell binary
-        shell_map = {
-            "sh": ["sh", "-c"],
-            "bash": ["bash", "-c"],
-            "command_prompt": ["sh", "-c"],   # fallback on Linux
-            "powershell": ["sh", "-c"],        # fallback on Linux
-        }
-        shell = shell_map.get(executor_name, ["sh", "-c"])
+        if target:
+            exec_result = _run_ssh(command, target)
+        else:
+            exec_result = _run_local(command, executor_name)
 
-        try:
-            result = subprocess.run(
-                shell + [command],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            return {
-                "status": "success",
-                "technique_id": technique_id,
-                "test_name": test.get("name"),
-                "executor": executor_name,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "returncode": result.returncode,
-            }
-        except subprocess.TimeoutExpired:
-            return {"status": "error", "message": "Command timed out (30s)"}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+        if "error" in exec_result:
+            return {"status": "error", "message": exec_result["error"]}
+
+        return {
+            "status": "success",
+            "technique_id": technique_id,
+            "test_name": test.get("name"),
+            "executor": executor_name,
+            "target": target.get("host") if target else "local",
+            **exec_result,
+        }

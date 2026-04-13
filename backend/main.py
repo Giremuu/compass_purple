@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import init_db
-from backend.routers import modules, runs, sources
+from backend.routers import modules, runs, sources, targets
 
 
 @asynccontextmanager
@@ -25,6 +25,7 @@ app.add_middleware(
 app.include_router(modules.router, prefix="/modules", tags=["modules"])
 app.include_router(runs.router, prefix="/runs", tags=["runs"])
 app.include_router(sources.router, prefix="/sources", tags=["sources"])
+app.include_router(targets.router, prefix="/targets", tags=["targets"])
 
 
 @app.get("/health")

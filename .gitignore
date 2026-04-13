@@ -11,6 +11,7 @@ data/*.db
 
 # Environment
 .env
+API.md
 
 # IDE
 .vscode/

@@ -1,3 +1,6 @@
 [submodule "data/atomic"]
 	path = data/atomic
 	url = https://github.com/redcanaryco/atomic-red-team.git
+[submodule "data/sigma"]
+	path = data/sigma
+	url = https://github.com/SigmaHQ/sigma.git
